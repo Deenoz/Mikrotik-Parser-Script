@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Настройки
+# Settings
 DOMAIN_LIST_URL="https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-raw.lst"
 ADDRESS_LIST_NAME="listname"
 MIKROTIK_HOST="rb_ip"
@@ -8,27 +8,26 @@ MIKROTIK_USER="user"
 MIKROTIK_SSH_PORT="22"
 MIKROTIK_PASS="psswd"
 
-
-# Временные файлы
+# Temporary files
 TMP_DOMAINS="/tmp/domains.lst"
 TMP_SCRIPT="/tmp/mikrotik-update.rsc"
 
-# Цвета для вывода
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${GREEN}=== Обновление address-list для MikroTik ===${NC}"
+echo -e "${GREEN}=== Updating address-list for MikroTik ===${NC}"
 
-# Загрузка списка доменов
-echo -e "${YELLOW}Скачиваем список доменов...${NC}"
+# Download domain list
+echo -e "${YELLOW}Downloading domain list...${NC}"
 if ! curl -s -o "$TMP_DOMAINS" "$DOMAIN_LIST_URL"; then
-    echo -e "${RED}Ошибка: Не удалось скачать список доменов.${NC}"
+    echo -e "${RED}Error: Failed to download domain list.${NC}"
     exit 1
 fi
 
-# убираем комментарии и пустые строки
+# Remove comments and empty lines
 DOMAINS=()
 while IFS= read -r line; do
     domain=$(echo "$line" | sed 's/#.*//' | xargs)
@@ -37,63 +36,63 @@ while IFS= read -r line; do
     fi
 done < "$TMP_DOMAINS"
 
-echo -e "${GREEN}Найдено доменов: ${#DOMAINS[@]}${NC}"
+echo -e "${GREEN}Domains found: ${#DOMAINS[@]}${NC}"
 
-# Резолвим IP-адреса
+# Resolve IP addresses
 IPS=()
 for domain in "${DOMAINS[@]}"; do
-    # Используем Google DNS (8.8.8.8) для резолва
+    # Use Google DNS (8.8.8.8) for resolution
     ip=$(dig +short "$domain" @8.8.8.8 A | head -n1)
     if [[ -n "$ip" ]]; then
-        echo "Резолв: $domain -> $ip"
+        echo "Resolving: $domain -> $ip"
         IPS+=("$ip")
     else
-        echo -e "${RED}Не удалось резолвить: $domain${NC}"
+        echo -e "${RED}Failed to resolve: $domain${NC}"
     fi
-    # Задержка, чтобы не перегружать DNS
+    # Delay to avoid overwhelming DNS
     sleep 0.1
 done
 
-# Уникальные IP
+# Get unique IPs
 readarray -t UNIQUE_IPS < <(printf '%s\n' "${IPS[@]}" | sort -u)
 
-echo -e "${GREEN}Уникальных IP найдено: ${#UNIQUE_IPS[@]}${NC}"
+echo -e "${GREEN}Unique IPs found: ${#UNIQUE_IPS[@]}${NC}"
 
-# Генерируем скрипт для MikroTik
+# Generate MikroTik script
 cat > "$TMP_SCRIPT" << EOF
-# Автоматически сгенерировано: $(date)
-# Обновление address-list "$ADDRESS_LIST_NAME"
+# Automatically generated: $(date)
+# Updating address-list "$ADDRESS_LIST_NAME"
 
-# Удаляем старые записи
+# Remove old entries
 /ip firewall address-list remove [find list="$ADDRESS_LIST_NAME"]
 
-# Добавляем новые IP
+# Add new IPs
 EOF
 
 for ip in "${UNIQUE_IPS[@]}"; do
     echo "/ip firewall address-list add list=\"$ADDRESS_LIST_NAME\" address=$ip comment=\"ip-$ip\"" >> "$TMP_SCRIPT"
 done
 
-echo -e "${YELLOW}Скрипт для MikroTik сохранён: $TMP_SCRIPT${NC}"
+echo -e "${YELLOW}MikroTik script saved: $TMP_SCRIPT${NC}"
 
-# Отправить на MikroTik через SSH
-echo -e "${YELLOW}Отправить команды на MikroTik ($MIKROTIK_HOST) через SSH? (y/n)${NC}"
+# Send commands to MikroTik via SSH
+echo -e "${YELLOW}Send commands to MikroTik ($MIKROTIK_HOST) via SSH? (y/n)${NC}"
 read -r answer
 if [[ "$answer" =~ ^[Yy]$ ]]; then
-    echo -e "${GREEN}Отправляем команды на MikroTik...${NC}"
+    echo -e "${GREEN}Sending commands to MikroTik...${NC}"
     sshpass -p "$MIKROTIK_PASS" ssh -p "$MIKROTIK_SSH_PORT" -o StrictHostKeyChecking=no "$MIKROTIK_USER@$MIKROTIK_HOST" -T < "$TMP_SCRIPT"
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN} Address-list '$ADDRESS_LIST_NAME' успешно обновлён на MikroTik.${NC}"
+        echo -e "${GREEN}Address-list '$ADDRESS_LIST_NAME' successfully updated on MikroTik.${NC}"
     else
-        echo -e "${RED} Ошибка при подключении к MikroTik.${NC}"
+        echo -e "${RED}Error connecting to MikroTik.${NC}"
         exit 1
     fi
 else
-    echo -e "${YELLOW}Вы можете вручную выполнить команды из файла: $TMP_SCRIPT${NC}"
+    echo -e "${YELLOW}You can manually run the commands from file: $TMP_SCRIPT${NC}"
 fi
 
-# Очистка
+# Cleanup
 rm -f "$TMP_DOMAINS"
-rm -f "$TMP_SCRIPT"  
+rm -f "$TMP_SCRIPT"
 
-echo -e "${GREEN}Готово.${NC}"
+echo -e "${GREEN}Done.${NC}"
